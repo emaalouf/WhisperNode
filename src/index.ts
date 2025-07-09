@@ -2,8 +2,15 @@ import fs from 'fs-extra';
 import path from 'path';
 import { nodewhisper } from 'nodejs-whisper';
 import { config, SUPPORTED_EXTENSIONS } from './config';
-import { extractVideoId, detectLanguage } from './utils';
+import { extractVideoId, detectLanguage, postProcessSubtitles } from './utils';
 import os from 'os';
+
+// Set environment variables for CUDA before importing nodewhisper
+if (config.withCuda) {
+  process.env.WHISPER_CUDA = '1';
+  process.env.WHISPER_CUDA_DEVICE = '0';
+  console.log('🚀 CUDA enabled for Whisper processing');
+}
 
 // Track processing progress
 let processedCount = 0;
@@ -88,10 +95,11 @@ async function processVideo(videoPath: string): Promise<void> {
       outputInWords: config.formats.words,
       outputInLrc: config.formats.lrc,
       outputInCsv: config.formats.csv,
-      wordTimestamps: config.wordTimestamps,
-      // Turn off split on word to get groups of words per timestamp
+      // For Arabic text, we need to disable word timestamps to get proper phrase groups
+      wordTimestamps: false,
       splitOnWord: false,
       translateToEnglish: config.translateToEnglish,
+      max_words_per_line: 7, // Add minimum words per line
     };
     
     // Add language parameter if detected
@@ -108,6 +116,25 @@ async function processVideo(videoPath: string): Promise<void> {
       logger: console,
       whisperOptions,
     });
+    
+    // Post-process the subtitle files to combine single characters into word groups
+    const baseFileName = path.basename(videoPath, path.extname(videoPath));
+    const dirPath = path.dirname(videoPath);
+    
+    // Process SRT and VTT files
+    if (config.formats.srt) {
+      const srtFile = path.join(dirPath, `${baseFileName}.srt`);
+      if (await fs.pathExists(srtFile)) {
+        await postProcessSubtitles(srtFile, 7); // Minimum 7 words per line as requested
+      }
+    }
+    
+    if (config.formats.vtt) {
+      const vttFile = path.join(dirPath, `${baseFileName}.vtt`);
+      if (await fs.pathExists(vttFile)) {
+        await postProcessSubtitles(vttFile, 7);
+      }
+    }
     
     // After processing, handle the output files to preserve video ID
     await handleOutputFiles(videoPath);

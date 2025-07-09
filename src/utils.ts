@@ -1,5 +1,152 @@
 import path from 'path';
+import fs from 'fs-extra';
 import { config } from './config';
+
+/**
+ * Post-processes subtitle files to combine individual characters into word groups
+ * @param filePath Path to the subtitle file
+ * @param minWordsPerLine Minimum number of words per line (default 5)
+ */
+export async function postProcessSubtitles(filePath: string, minWordsPerLine: number = 5): Promise<void> {
+  // Only process certain subtitle formats
+  const ext = path.extname(filePath).toLowerCase();
+  if (!['.srt', '.vtt'].includes(ext)) {
+    return;
+  }
+  
+  try {
+    // Read the subtitle file
+    const content = await fs.readFile(filePath, 'utf8');
+    
+    // Process based on file type
+    let processedContent: string;
+    if (ext === '.srt') {
+      processedContent = processSrtFile(content, minWordsPerLine);
+    } else if (ext === '.vtt') {
+      processedContent = processVttFile(content, minWordsPerLine);
+    } else {
+      return;
+    }
+    
+    // Write processed content back to file
+    await fs.writeFile(filePath, processedContent, 'utf8');
+    console.log(`📝 Post-processed subtitle file: ${path.basename(filePath)}`);
+  } catch (error) {
+    console.error(`❌ Error post-processing subtitle file: ${filePath}`, error);
+  }
+}
+
+/**
+ * Process SRT subtitle file to combine characters into proper word groups
+ */
+function processSrtFile(content: string, minWordsPerLine: number): string {
+  // Split by subtitle entries (double newline)
+  let entries = content.split('\r\n\r\n').filter(Boolean);
+  if (entries.length <= 1) {
+    entries = content.split('\n\n').filter(Boolean);
+  }
+  
+  let currentGroup: string[] = [];
+  let currentTimestamp = '';
+  let currentIndex = 1;
+  let result: string[] = [];
+  
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const lines = entry.split('\n').filter(Boolean);
+    
+    if (lines.length < 2) continue;
+    
+    const indexLine = lines[0];
+    const timestampLine = lines[1];
+    const textLine = lines.slice(2).join(' ').trim();
+    
+    // If this is a single character or very short text, add to current group
+    if (textLine.length <= 3 || countWords(textLine) < minWordsPerLine) {
+      if (currentGroup.length === 0) {
+        currentTimestamp = timestampLine;
+      }
+      currentGroup.push(textLine);
+    } else {
+      // This entry already has enough words, keep it as is
+      if (currentGroup.length > 0) {
+        // Add the previous group first
+        result.push(`${currentIndex}\n${currentTimestamp}\n${currentGroup.join(' ')}`);
+        currentIndex++;
+        currentGroup = [];
+      }
+      
+      // Then add this complete entry
+      result.push(`${currentIndex}\n${timestampLine}\n${textLine}`);
+      currentIndex++;
+    }
+  }
+  
+  // Add any remaining group
+  if (currentGroup.length > 0) {
+    result.push(`${currentIndex}\n${currentTimestamp}\n${currentGroup.join(' ')}`);
+  }
+  
+  return result.join('\n\n') + '\n\n';
+}
+
+/**
+ * Process VTT subtitle file to combine characters into proper word groups
+ */
+function processVttFile(content: string, minWordsPerLine: number): string {
+  // For VTT, first line is "WEBVTT" - preserve it
+  const vttHeader = content.split('\n')[0];
+  
+  // Rest is similar to SRT
+  const parts = content.split('\n\n').slice(1).filter(Boolean);
+  
+  let currentGroup: string[] = [];
+  let currentTimestamp = '';
+  let result: string[] = [vttHeader];
+  
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const lines = part.split('\n').filter(Boolean);
+    
+    if (lines.length < 2) continue;
+    
+    const timestampLine = lines[0];
+    const textLine = lines.slice(1).join(' ').trim();
+    
+    // If this is a single character or very short text, add to current group
+    if (textLine.length <= 3 || countWords(textLine) < minWordsPerLine) {
+      if (currentGroup.length === 0) {
+        currentTimestamp = timestampLine;
+      }
+      currentGroup.push(textLine);
+    } else {
+      // This entry already has enough words, keep it as is
+      if (currentGroup.length > 0) {
+        // Add the previous group first
+        result.push(`${currentTimestamp}\n${currentGroup.join(' ')}`);
+        currentGroup = [];
+      }
+      
+      // Then add this complete entry
+      result.push(`${timestampLine}\n${textLine}`);
+    }
+  }
+  
+  // Add any remaining group
+  if (currentGroup.length > 0) {
+    result.push(`${currentTimestamp}\n${currentGroup.join(' ')}`);
+  }
+  
+  return result.join('\n\n') + '\n\n';
+}
+
+/**
+ * Count the number of words in a string
+ */
+function countWords(text: string): number {
+  // For Arabic text, count words by splitting on spaces and filtering empty strings
+  return text.split(/\s+/).filter(Boolean).length;
+}
 
 /**
  * Extracts the video ID from a filename with the pattern: name-videoId.extension

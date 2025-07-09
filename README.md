@@ -16,6 +16,7 @@ A Node.js application that uses [nodejs-whisper](https://www.npmjs.com/package/n
 - **Parallel processing** for multiple files simultaneously
 - **Progress tracking** showing completed/total videos
 - **Word grouping** for more readable subtitle phrases
+- **Arabic text optimization** with post-processing to group characters into words
 
 ## Prerequisites
 
@@ -99,8 +100,10 @@ WHISPER_MODEL=base
 
 # Processing options
 USE_CUDA=true  # Default enabled (set to 'false' to disable GPU)
-WORD_TIMESTAMPS=true
-SPLIT_ON_WORD=false  # Default now set to false to group words by timestamps
+WHISPER_CUDA=1  # Force CUDA usage
+WHISPER_CUDA_DEVICE=0  # Use first GPU device
+WORD_TIMESTAMPS=false  # Disable individual word timestamps 
+SPLIT_ON_WORD=false  # Group words by timestamps
 TRANSLATE_TO_ENGLISH=false
 REMOVE_WAV_FILE=true
 
