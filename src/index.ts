@@ -34,6 +34,9 @@ if (config.withCuda) {
   console.log('🚀 CUDA enabled for Whisper processing');
 }
 
+// Suppress nodejs-whisper internal warnings
+process.env.NODE_NO_WARNINGS = '1';
+
 // Track processing progress
 let processedCount = 0;
 let totalVideos = 0;
@@ -177,6 +180,10 @@ async function processVideo(videoPath: string): Promise<void> {
 function createWorkerScript() {
   // Create a worker script that can be executed in a separate thread
   const workerScript = `
+    // Suppress warnings in worker threads
+    process.env.NODE_NO_WARNINGS = '1';
+    process.env.WHISPER_SUPPRESS_WARNINGS = '1';
+    
     const { parentPort, workerData } = require('worker_threads');
     const { nodewhisper } = require('nodejs-whisper');
     const fs = require('fs-extra');
@@ -184,7 +191,23 @@ function createWorkerScript() {
 
     async function processVideoInWorker(videoPath, options) {
       try {
+        // Suppress stderr warnings during processing
+        const originalStderr = process.stderr.write;
+        process.stderr.write = function(chunk, encoding, callback) {
+          const str = chunk.toString();
+          // Only suppress specific nodejs-whisper warnings, not real errors
+          if (str.includes('cd: not a directory') || 
+              str.includes('nodejs-whisper') && str.includes('warning')) {
+            return true;
+          }
+          return originalStderr.call(process.stderr, chunk, encoding, callback);
+        };
+        
         await nodewhisper(videoPath, options);
+        
+        // Restore stderr
+        process.stderr.write = originalStderr;
+        
         parentPort.postMessage({ success: true, videoPath });
       } catch (error) {
         parentPort.postMessage({ 

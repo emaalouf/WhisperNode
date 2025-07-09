@@ -248,5 +248,16 @@ if (!defaultConfig.useAmdGpu) {
   process.env.OMP_NUM_THREADS = Math.max(2, Math.floor(cpuCores / 4)).toString();
 }
 
+// Set environment variables for CUDA before importing nodewhisper
+if (defaultConfig.withCuda) {
+  process.env.WHISPER_CUDA = '1';
+  process.env.WHISPER_CUDA_DEVICE = '0';
+  console.log('🚀 CUDA enabled for Whisper processing');
+}
+
+// Suppress nodejs-whisper internal warnings and errors
+process.env.NODE_NO_WARNINGS = '1';
+process.env.WHISPER_SUPPRESS_WARNINGS = '1';
+
 // Export the configuration
 export const config: Config = defaultConfig; 
