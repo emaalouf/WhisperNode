@@ -1,0 +1,54 @@
+# Dependency directories
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# TypeScript build output
+dist/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Video files and generated subtitles
+videos/**/*.mp4
+videos/**/*.avi
+videos/**/*.mov
+videos/**/*.mkv
+videos/**/*.webm
+videos/**/*.flv
+videos/**/*.wmv
+videos/**/*.m4v
+videos/**/*.mp3
+videos/**/*.wav
+videos/**/*.ogg
+videos/**/*.aac
+videos/**/*.srt
+videos/**/*.vtt
+videos/**/*.json
+videos/**/*.txt
+videos/**/*.wts
+videos/**/*.lrc
+videos/**/*.csv
+
+# Whisper model files
+models/
+
+# OS specific
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Debug logs
+logs/
+*.log 

@@ -1,0 +1,26 @@
+{
+  "name": "whispernode",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "download-model": "npx nodejs-whisper download"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "An application that generates subtitles for videos using nodejs-whisper",
+  "dependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^24.0.12",
+    "dotenv": "^17.2.0",
+    "fs-extra": "^11.3.0",
+    "nodejs-whisper": "^0.2.9",
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
+  }
+}
