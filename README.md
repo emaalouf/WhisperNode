@@ -10,6 +10,7 @@ A Node.js application that uses [nodejs-whisper](https://www.npmjs.com/package/n
 - Word-level timestamps for accurate subtitle synchronization
 - Support for multiple languages
 - Customizable configuration via environment variables
+- **Preserves video IDs** in filenames for reupload compatibility (format: `name-viXXXXXX.mp4`)
 
 ## Prerequisites
 
@@ -49,6 +50,16 @@ A Node.js application that uses [nodejs-whisper](https://www.npmjs.com/package/n
    ```
 
 The application will process all video files in the `videos` directory and generate subtitle files alongside them.
+
+### Video ID Preservation
+
+If your video files contain IDs in the format `filename-viXXXXXX.mp4`, the application will preserve these IDs in the generated subtitle files. This is useful if you need to maintain these IDs for reuploading or matching with an external system.
+
+For example:
+- Original video: `lecture-vi4pXldZVULSf4JaSdaWK9sX.mp4`
+- Generated subtitles: 
+  - `lecture-vi4pXldZVULSf4JaSdaWK9sX.srt`
+  - `lecture-vi4pXldZVULSf4JaSdaWK9sX.vtt`
 
 ## Configuration
 

@@ -2,6 +2,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { nodewhisper } from 'nodejs-whisper';
 import { config, SUPPORTED_EXTENSIONS } from './config';
+import { extractVideoId } from './utils';
 
 // Create output directory if it doesn't exist
 async function ensureDirectories() {
@@ -14,6 +15,49 @@ async function ensureDirectories() {
 function isVideoFile(file: string): boolean {
   const extension = path.extname(file).toLowerCase();
   return SUPPORTED_EXTENSIONS.includes(extension);
+}
+
+/**
+ * Custom hook to preserve the video ID in the output files
+ * This function will be called after the nodewhisper processing completes
+ * @param originalFilePath The original video file path
+ */
+async function handleOutputFiles(originalFilePath: string): Promise<void> {
+  const originalFileName = path.basename(originalFilePath);
+  const { baseName, videoId, extension } = extractVideoId(originalFileName);
+  
+  // If there's no video ID, no need to rename files
+  if (!videoId) return;
+  
+  const baseNameWithoutExt = path.basename(originalFilePath, extension);
+  const dirPath = path.dirname(originalFilePath);
+  
+  // Get list of generated subtitle files (they'll have same basename but different extensions)
+  const files = await fs.readdir(dirPath);
+  
+  for (const file of files) {
+    // Find files with the same base name but different extension
+    const outputExtension = path.extname(file);
+    const possibleSubtitleExtensions = ['.srt', '.vtt', '.json', '.txt', '.wts', '.lrc', '.csv'];
+    
+    if (
+      possibleSubtitleExtensions.includes(outputExtension) &&
+      file.startsWith(baseNameWithoutExt) &&
+      !file.includes(videoId)
+    ) {
+      // This is a generated subtitle file without the video ID
+      const newFileName = `${baseNameWithoutExt}${videoId}${outputExtension}`;
+      const oldPath = path.join(dirPath, file);
+      const newPath = path.join(dirPath, newFileName);
+      
+      try {
+        await fs.rename(oldPath, newPath);
+        console.log(`✅ Renamed: ${file} -> ${newFileName}`);
+      } catch (error) {
+        console.error(`❌ Error renaming ${file}:`, error);
+      }
+    }
+  }
 }
 
 // Process a single video file
@@ -40,6 +84,9 @@ async function processVideo(videoPath: string): Promise<void> {
         translateToEnglish: config.translateToEnglish,
       },
     });
+    
+    // After processing, handle the output files to preserve video ID
+    await handleOutputFiles(videoPath);
     
     console.log(`✅ Completed: ${path.basename(videoPath)}`);
   } catch (error) {
