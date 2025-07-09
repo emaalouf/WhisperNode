@@ -20,7 +20,6 @@
     "dotenv": "^17.2.0",
     "fs-extra": "^11.3.0",
     "nodejs-whisper": "^0.2.9",
-    "thread-pool-node": "^1.0.9",
     "typescript": "^5.8.3"
   },
   "devDependencies": {

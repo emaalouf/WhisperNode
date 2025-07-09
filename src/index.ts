@@ -5,8 +5,7 @@ import { config, SUPPORTED_EXTENSIONS } from './config';
 import { extractVideoId, detectLanguage, postProcessSubtitles } from './utils';
 import os from 'os';
 import { Worker } from 'worker_threads';
-// @ts-ignore - Add ts-ignore for thread-pool-node which may not have type definitions
-const createPool = require('thread-pool-node');
+// No external pool library needed - using built-in worker_threads
 
 // Types for worker threads
 interface WorkerMessage {
@@ -38,8 +37,6 @@ if (config.withCuda) {
 // Track processing progress
 let processedCount = 0;
 let totalVideos = 0;
-// Worker thread pool
-let pool: any = null; // Worker thread pool
 
 // Create output directory if it doesn't exist
 async function ensureDirectories() {
@@ -210,127 +207,141 @@ function createWorkerScript() {
 async function processVideosInParallel(videoPaths: string[], concurrency: number): Promise<void> {
   console.log(`Setting up parallel processing with ${concurrency} concurrent processes...`);
   
-  // Create a worker thread pool
-  pool = createPool({ max: concurrency });
+  // Create worker script
   const workerScriptPath = createWorkerScript();
   
-  // Process videos in parallel batches
-  const promises = videoPaths.map(videoPath => {
-    return new Promise<void>(async (resolve, reject) => {
-      try {
-        const filename = path.basename(videoPath);
-        console.log(`Queuing: ${filename}`);
-        
-        // Detect language from filename
-        const language = detectLanguage(filename);
-        
-        // Create whisper options with language if detected
-        const whisperOptions: any = {
-          outputInSrt: config.formats.srt,
-          outputInVtt: config.formats.vtt,
-          outputInJson: config.formats.json,
-          outputInText: config.formats.text,
-          outputInWords: config.formats.words,
-          outputInLrc: config.formats.lrc,
-          outputInCsv: config.formats.csv,
-          // For Arabic text, we need to disable word timestamps to get proper phrase groups
-          wordTimestamps: config.wordTimestamps,
-          splitOnWord: config.splitOnWord,
-          translateToEnglish: config.translateToEnglish,
-          max_words_per_line: 7, // Add minimum words per line
-        };
-        
-        // Add language parameter if detected
-        if (language) {
-          whisperOptions.language = language;
-          console.log(`🌐 Using language for ${filename}: ${language}`);
+  // Simple queue management
+  const queue = [...videoPaths];
+  const activeWorkers: Set<Worker> = new Set();
+  
+  return new Promise<void>((resolve, reject) => {
+    let completedCount = 0;
+    
+    function processNext() {
+      if (queue.length === 0 && activeWorkers.size === 0) {
+        // All done
+        try {
+          fs.unlinkSync(workerScriptPath);
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        resolve();
+        return;
+      }
+      
+      // Start new workers if we have capacity and items in queue
+      while (activeWorkers.size < concurrency && queue.length > 0) {
+        const videoPath = queue.shift()!;
+        startWorker(videoPath);
+      }
+    }
+    
+    function startWorker(videoPath: string) {
+      const filename = path.basename(videoPath);
+      console.log(`Starting: ${filename}`);
+      
+      // Detect language from filename
+      const language = detectLanguage(filename);
+      if (language) {
+        console.log(`🌐 Using language for ${filename}: ${language}`);
+      }
+      
+      // Create whisper options with language if detected
+      const whisperOptions: any = {
+        outputInSrt: config.formats.srt,
+        outputInVtt: config.formats.vtt,
+        outputInJson: config.formats.json,
+        outputInText: config.formats.text,
+        outputInWords: config.formats.words,
+        outputInLrc: config.formats.lrc,
+        outputInCsv: config.formats.csv,
+        wordTimestamps: config.wordTimestamps,
+        splitOnWord: config.splitOnWord,
+        translateToEnglish: config.translateToEnglish,
+        max_words_per_line: 7,
+      };
+      
+      if (language) {
+        whisperOptions.language = language;
+      }
+      
+      const options = {
+        modelName: config.modelName,
+        autoDownloadModelName: config.modelName,
+        removeWavFileAfterTranscription: config.removeWavFileAfterTranscription,
+        withCuda: config.withCuda,
+        whisperOptions,
+      };
+      
+      // Create worker
+      const worker = new Worker(workerScriptPath, {
+        workerData: { videoPath, options }
+      });
+      
+      activeWorkers.add(worker);
+      
+      worker.on('message', async (result: WorkerMessage) => {
+        try {
+          if (result.success) {
+            // Post-process the subtitle files
+            const baseFileName = path.basename(videoPath, path.extname(videoPath));
+            const dirPath = path.dirname(videoPath);
+            
+            // Process SRT and VTT files
+            if (config.formats.srt) {
+              const srtFile = path.join(dirPath, `${baseFileName}.srt`);
+              if (await fs.pathExists(srtFile)) {
+                await postProcessSubtitles(srtFile, 7);
+              }
+            }
+            
+            if (config.formats.vtt) {
+              const vttFile = path.join(dirPath, `${baseFileName}.vtt`);
+              if (await fs.pathExists(vttFile)) {
+                await postProcessSubtitles(vttFile, 7);
+              }
+            }
+            
+            // After processing, handle the output files to preserve video ID
+            await handleOutputFiles(videoPath);
+            
+            processedCount++;
+            console.log(`✅ Completed: ${filename} (${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete)`);
+          } else {
+            console.error(`❌ Error processing ${filename}:`, result.error);
+            processedCount++;
+            console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
+          }
+        } catch (error) {
+          console.error(`❌ Post-processing error for ${filename}:`, error);
+          processedCount++;
+          console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
         }
         
-        const options = {
-          modelName: config.modelName,
-          autoDownloadModelName: config.modelName,
-          removeWavFileAfterTranscription: config.removeWavFileAfterTranscription,
-          // Enable GPU acceleration
-          withCuda: config.withCuda,
-          whisperOptions,
-        };
+        // Worker finished
+        activeWorkers.delete(worker);
+        await worker.terminate();
         
-        // Use worker pool to process the video
-        pool.acquire(workerScriptPath, { videoPath, options } as WorkerData, function(err: Error | null, worker: Worker) {
-          if (err) {
-            console.error(`❌ Worker error for ${filename}:`, err);
-            processedCount++;
-            console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
-            resolve();
-            return;
-          }
-          
-          // Listen for worker completion
-          worker.on('message', async (result: WorkerMessage) => {
-            if (result.success) {
-              try {
-                // Post-process the subtitle files
-                const baseFileName = path.basename(videoPath, path.extname(videoPath));
-                const dirPath = path.dirname(videoPath);
-                
-                // Process SRT and VTT files
-                if (config.formats.srt) {
-                  const srtFile = path.join(dirPath, `${baseFileName}.srt`);
-                  if (await fs.pathExists(srtFile)) {
-                    await postProcessSubtitles(srtFile, 7);
-                  }
-                }
-                
-                if (config.formats.vtt) {
-                  const vttFile = path.join(dirPath, `${baseFileName}.vtt`);
-                  if (await fs.pathExists(vttFile)) {
-                    await postProcessSubtitles(vttFile, 7);
-                  }
-                }
-                
-                // After processing, handle the output files to preserve video ID
-                await handleOutputFiles(videoPath);
-                
-                processedCount++;
-                console.log(`✅ Completed: ${filename} (${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete)`);
-              } catch (error) {
-                console.error(`❌ Post-processing error for ${filename}:`, error);
-                processedCount++;
-                console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
-              }
-            } else {
-              console.error(`❌ Error processing ${filename}:`, result.error);
-              processedCount++;
-              console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
-            }
-            resolve();
-          });
-          
-          worker.on('error', (err: Error) => {
-            console.error(`❌ Worker error for ${filename}:`, err);
-            processedCount++;
-            console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
-            resolve();
-          });
-        });
-      } catch (error) {
-        console.error(`❌ Error queueing ${path.basename(videoPath)}:`, error);
+        // Process next item
+        processNext();
+      });
+      
+      worker.on('error', async (err: Error) => {
+        console.error(`❌ Worker error for ${filename}:`, err);
         processedCount++;
         console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
-        resolve();
-      }
-    });
+        
+        activeWorkers.delete(worker);
+        await worker.terminate();
+        
+        // Process next item
+        processNext();
+      });
+    }
+    
+    // Start initial workers
+    processNext();
   });
-  
-  // Wait for all videos to be processed
-  await Promise.all(promises);
-  
-  // Clean up the worker script
-  try {
-    fs.unlinkSync(workerScriptPath);
-  } catch (e) {
-    // Ignore cleanup errors
-  }
 }
 
 // Main function
@@ -372,10 +383,7 @@ async function main() {
   } catch (error) {
     console.error('An error occurred:', error);
   } finally {
-    // Clean up worker thread pool if used
-    if (pool) {
-      pool.destroy();
-    }
+    // Worker cleanup is handled automatically in the processVideosInParallel function
   }
 }
 
