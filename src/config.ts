@@ -41,6 +41,9 @@ interface Config {
   detectLanguage: boolean;        // Whether to attempt language detection
   languageMap: Record<string, string>; // Map video filename patterns to languages
   
+  // Language detection method
+  languageDetectionMethod: 'manual' | 'enhanced' | 'auto' | 'whisper-only';
+  
   // Subtitle post-processing
   deduplicateSubtitles: boolean;
   maxDuplicates: number;
@@ -81,6 +84,9 @@ const defaultConfig: Config = {
   defaultLanguage: process.env.DEFAULT_LANGUAGE || null,
   detectLanguage: process.env.DETECT_LANGUAGE !== 'false',
   languageMap: parseLanguageMap(process.env.LANGUAGE_MAP),
+  
+  // Language detection method: 'manual', 'enhanced', 'auto', 'whisper-only'
+  languageDetectionMethod: (process.env.LANGUAGE_DETECTION_METHOD || 'manual') as 'manual' | 'enhanced' | 'auto' | 'whisper-only',
   
   // Subtitle post-processing
   deduplicateSubtitles: process.env.DEDUPLICATE_SUBTITLES === 'false' ? false : true,
@@ -128,6 +134,8 @@ export const AVAILABLE_MODELS = [
   'medium',
   'medium.en',
   'large-v1',
+  'large-v2',
+  'large-v3',
   'large',
   'large-v3-turbo',
 ];

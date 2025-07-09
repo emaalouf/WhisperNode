@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { nodewhisper } from 'nodejs-whisper';
 import { config, SUPPORTED_EXTENSIONS } from './config';
-import { extractVideoId, detectLanguage, postProcessSubtitles } from './utils';
+import { extractVideoId, detectLanguage, postProcessSubtitles, detectLanguageEnhanced, detectLanguageAuto } from './utils';
 import os from 'os';
 import { Worker } from 'worker_threads';
 // No external pool library needed - using built-in worker_threads
@@ -103,12 +103,28 @@ async function processVideo(videoPath: string): Promise<void> {
     const filename = path.basename(videoPath);
     console.log(`Processing: ${filename}`);
     
-    // Detect language from filename
-    const language = detectLanguage(filename);
-    if (language) {
-      console.log(`🌐 Using language: ${language}`);
+    // Detect language using configured method
+    let language: string | null = null;
+    
+    switch (config.languageDetectionMethod) {
+      case 'manual':
+        language = detectLanguage(filename);
+        break;
+      case 'enhanced':
+        language = detectLanguageEnhanced(filename);
+        break;
+      case 'auto':
+        language = await detectLanguageAuto(filename);
+        break;
+      case 'whisper-only':
+        language = 'auto'; // Let Whisper handle everything
+        break;
+    }
+    
+    if (language && language !== 'auto') {
+      console.log(`🌐 Using language: ${language} (method: ${config.languageDetectionMethod})`);
     } else {
-      console.log(`🌐 No specific language detected, letting Whisper auto-detect`);
+      console.log(`🤖 Using Whisper auto-detection (method: ${config.languageDetectionMethod})`);
     }
     
     // Create whisper options with language if detected
@@ -127,8 +143,8 @@ async function processVideo(videoPath: string): Promise<void> {
       max_words_per_line: 7, // Add minimum words per line
     };
     
-    // Add language parameter if detected
-    if (language) {
+    // Add language parameter if detected (skip if 'auto' to let Whisper auto-detect)
+    if (language && language !== 'auto') {
       whisperOptions.language = language;
     }
     
@@ -255,18 +271,39 @@ async function processVideosInParallel(videoPaths: string[], concurrency: number
       // Start new workers if we have capacity and items in queue
       while (activeWorkers.size < concurrency && queue.length > 0) {
         const videoPath = queue.shift()!;
-        startWorker(videoPath);
+        startWorker(videoPath).catch(error => {
+          console.error(`❌ Error starting worker:`, error);
+          processNext();
+        });
       }
     }
     
-    function startWorker(videoPath: string) {
+    async function startWorker(videoPath: string) {
       const filename = path.basename(videoPath);
       console.log(`Starting: ${filename}`);
       
-      // Detect language from filename
-      const language = detectLanguage(filename);
-      if (language) {
-        console.log(`🌐 Using language for ${filename}: ${language}`);
+      // Detect language using configured method
+      let language: string | null = null;
+      
+      switch (config.languageDetectionMethod) {
+        case 'manual':
+          language = detectLanguage(filename);
+          break;
+        case 'enhanced':
+          language = detectLanguageEnhanced(filename);
+          break;
+        case 'auto':
+          language = await detectLanguageAuto(filename);
+          break;
+        case 'whisper-only':
+          language = 'auto'; // Let Whisper handle everything
+          break;
+      }
+      
+      if (language && language !== 'auto') {
+        console.log(`🌐 Using language for ${filename}: ${language} (method: ${config.languageDetectionMethod})`);
+      } else {
+        console.log(`🤖 Using Whisper auto-detection for ${filename} (method: ${config.languageDetectionMethod})`);
       }
       
       // Create whisper options with language if detected
@@ -284,7 +321,7 @@ async function processVideosInParallel(videoPaths: string[], concurrency: number
         max_words_per_line: 7,
       };
       
-      if (language) {
+      if (language && language !== 'auto') {
         whisperOptions.language = language;
       }
       
