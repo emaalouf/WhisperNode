@@ -143,6 +143,37 @@ LANGUAGE_MAP=arabic:ar,Marina:en,الدوالي:ar,النوم:ar,النزيف:ar
 - Video: .mp4, .avi, .mov, .mkv, .webm, .flv, .wmv, .m4v
 - Audio: .mp3, .wav, .ogg, .aac
 
+## Troubleshooting
+
+### Model Path Issues
+
+If you encounter errors like:
+```
+whisper_init_from_file_with_params_no_state: failed to open './models/ggml-base.bin'
+error: failed to initialize whisper context
+```
+
+This means the Whisper CLI cannot find the model files. Run the fix script:
+
+```bash
+./fix-model-path.sh
+```
+
+This script creates a symbolic link from the project root's `models` directory to the nodejs-whisper models directory, allowing the CLI to find the model files.
+
+If the script doesn't exist, you can create the symbolic link manually:
+
+```bash
+ln -sf node_modules/nodejs-whisper/cpp/whisper.cpp/models models
+```
+
+### Performance Issues
+
+For optimal performance:
+- Enable CUDA if you have an NVIDIA GPU: `USE_CUDA=true`
+- Use parallel processing: `npm run parallel-process`
+- Choose an appropriate model size (base is a good balance of speed vs accuracy)
+
 ## Development
 
 For development with automatic reloading:
