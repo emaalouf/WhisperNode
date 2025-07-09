@@ -12,6 +12,10 @@ A Node.js application that uses [nodejs-whisper](https://www.npmjs.com/package/n
 - Customizable configuration via environment variables
 - **Preserves video IDs** in filenames for reupload compatibility (format: `name-viXXXXXX.mp4`)
 - **Smart language detection** from filenames to improve transcription accuracy
+- **GPU acceleration** for faster processing
+- **Parallel processing** for multiple files simultaneously
+- **Progress tracking** showing completed/total videos
+- **Word grouping** for more readable subtitle phrases
 
 ## Prerequisites
 
@@ -94,9 +98,9 @@ You can customize the application by creating a `.env` file in the project root 
 WHISPER_MODEL=base
 
 # Processing options
-USE_CUDA=false
+USE_CUDA=true  # Default enabled (set to 'false' to disable GPU)
 WORD_TIMESTAMPS=true
-SPLIT_ON_WORD=true
+SPLIT_ON_WORD=false  # Default now set to false to group words by timestamps
 TRANSLATE_TO_ENGLISH=false
 REMOVE_WAV_FILE=true
 

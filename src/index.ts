@@ -3,6 +3,11 @@ import path from 'path';
 import { nodewhisper } from 'nodejs-whisper';
 import { config, SUPPORTED_EXTENSIONS } from './config';
 import { extractVideoId, detectLanguage } from './utils';
+import os from 'os';
+
+// Track processing progress
+let processedCount = 0;
+let totalVideos = 0;
 
 // Create output directory if it doesn't exist
 async function ensureDirectories() {
@@ -84,7 +89,8 @@ async function processVideo(videoPath: string): Promise<void> {
       outputInLrc: config.formats.lrc,
       outputInCsv: config.formats.csv,
       wordTimestamps: config.wordTimestamps,
-      splitOnWord: config.splitOnWord,
+      // Turn off split on word to get groups of words per timestamp
+      splitOnWord: false,
       translateToEnglish: config.translateToEnglish,
     };
     
@@ -97,6 +103,7 @@ async function processVideo(videoPath: string): Promise<void> {
       modelName: config.modelName,
       autoDownloadModelName: config.modelName,
       removeWavFileAfterTranscription: config.removeWavFileAfterTranscription,
+      // Enable GPU acceleration
       withCuda: config.withCuda,
       logger: console,
       whisperOptions,
@@ -105,9 +112,28 @@ async function processVideo(videoPath: string): Promise<void> {
     // After processing, handle the output files to preserve video ID
     await handleOutputFiles(videoPath);
     
-    console.log(`✅ Completed: ${filename}`);
+    // Increment processed count and show progress
+    processedCount++;
+    console.log(`✅ Completed: ${filename} (${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete)`);
   } catch (error) {
     console.error(`❌ Error processing ${path.basename(videoPath)}:`, error);
+    
+    // Still increment count even if there was an error
+    processedCount++;
+    console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
+  }
+}
+
+// Process multiple videos in parallel
+async function processVideosInParallel(videoPaths: string[], concurrency: number): Promise<void> {
+  // Process videos in batches based on concurrency
+  const batches = [];
+  for (let i = 0; i < videoPaths.length; i += concurrency) {
+    batches.push(videoPaths.slice(i, i + concurrency));
+  }
+  
+  for (const batch of batches) {
+    await Promise.all(batch.map(videoPath => processVideo(videoPath)));
   }
 }
 
@@ -125,13 +151,23 @@ async function main() {
       return;
     }
     
-    console.log(`Found ${videoFiles.length} video files. Starting processing...`);
+    // Set total videos count for progress tracking
+    totalVideos = videoFiles.length;
+    console.log(`Found ${totalVideos} video files. Starting processing...`);
     
-    // Process each video sequentially
-    for (const videoFile of videoFiles) {
-      const videoPath = path.join(config.videosDir, videoFile);
-      await processVideo(videoPath);
-    }
+    // Determine optimal concurrency based on available CPU cores
+    // When using GPU, we can process multiple videos concurrently
+    const cpuCores = os.cpus().length;
+    // Using half the cores for parallelism with GPU (adjust this based on performance testing)
+    const concurrency = config.withCuda ? Math.max(2, Math.floor(cpuCores / 2)) : 1;
+    
+    console.log(`Using ${concurrency} concurrent processes with GPU: ${config.withCuda ? 'Enabled' : 'Disabled'}`);
+    
+    // Create an array of file paths to process
+    const videoPaths = videoFiles.map(file => path.join(config.videosDir, file));
+    
+    // Process videos in parallel
+    await processVideosInParallel(videoPaths, concurrency);
     
     console.log('All videos processed successfully!');
   } catch (error) {

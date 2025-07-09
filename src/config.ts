@@ -43,7 +43,7 @@ const defaultConfig: Config = {
   outputDir: process.env.OUTPUT_DIR || path.join(process.cwd(), 'videos'), // Save alongside videos by default
   
   modelName: process.env.WHISPER_MODEL || 'base',
-  withCuda: process.env.USE_CUDA === 'true' || false,
+  withCuda: process.env.USE_CUDA === 'false' ? false : true, // Default to true unless explicitly set to false
   
   formats: {
     srt: true,
