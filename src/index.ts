@@ -5,9 +5,8 @@ import { config, SUPPORTED_EXTENSIONS } from './config';
 import { extractVideoId, detectLanguage, postProcessSubtitles } from './utils';
 import os from 'os';
 import { Worker } from 'worker_threads';
-// @ts-ignore - Add ts-ignore for worker-threads-pool which may not have type definitions
-const workerThreadsPool = require('worker-threads-pool');
-const createPool = workerThreadsPool.createPool;
+// @ts-ignore - Add ts-ignore for thread-pool-node which may not have type definitions
+const createPool = require('thread-pool-node');
 
 // Types for worker threads
 interface WorkerMessage {
