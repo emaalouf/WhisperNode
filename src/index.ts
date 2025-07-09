@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { nodewhisper } from 'nodejs-whisper';
 import { config, SUPPORTED_EXTENSIONS } from './config';
-import { extractVideoId } from './utils';
+import { extractVideoId, detectLanguage } from './utils';
 
 // Create output directory if it doesn't exist
 async function ensureDirectories() {
@@ -63,7 +63,35 @@ async function handleOutputFiles(originalFilePath: string): Promise<void> {
 // Process a single video file
 async function processVideo(videoPath: string): Promise<void> {
   try {
-    console.log(`Processing: ${path.basename(videoPath)}`);
+    const filename = path.basename(videoPath);
+    console.log(`Processing: ${filename}`);
+    
+    // Detect language from filename
+    const language = detectLanguage(filename);
+    if (language) {
+      console.log(`🌐 Using language: ${language}`);
+    } else {
+      console.log(`🌐 No specific language detected, letting Whisper auto-detect`);
+    }
+    
+    // Create whisper options with language if detected
+    const whisperOptions: any = {
+      outputInSrt: config.formats.srt,
+      outputInVtt: config.formats.vtt,
+      outputInJson: config.formats.json,
+      outputInText: config.formats.text,
+      outputInWords: config.formats.words,
+      outputInLrc: config.formats.lrc,
+      outputInCsv: config.formats.csv,
+      wordTimestamps: config.wordTimestamps,
+      splitOnWord: config.splitOnWord,
+      translateToEnglish: config.translateToEnglish,
+    };
+    
+    // Add language parameter if detected
+    if (language) {
+      whisperOptions.language = language;
+    }
     
     await nodewhisper(videoPath, {
       modelName: config.modelName,
@@ -71,24 +99,13 @@ async function processVideo(videoPath: string): Promise<void> {
       removeWavFileAfterTranscription: config.removeWavFileAfterTranscription,
       withCuda: config.withCuda,
       logger: console,
-      whisperOptions: {
-        outputInSrt: config.formats.srt,
-        outputInVtt: config.formats.vtt,
-        outputInJson: config.formats.json,
-        outputInText: config.formats.text,
-        outputInWords: config.formats.words,
-        outputInLrc: config.formats.lrc,
-        outputInCsv: config.formats.csv,
-        wordTimestamps: config.wordTimestamps,
-        splitOnWord: config.splitOnWord,
-        translateToEnglish: config.translateToEnglish,
-      },
+      whisperOptions,
     });
     
     // After processing, handle the output files to preserve video ID
     await handleOutputFiles(videoPath);
     
-    console.log(`✅ Completed: ${path.basename(videoPath)}`);
+    console.log(`✅ Completed: ${filename}`);
   } catch (error) {
     console.error(`❌ Error processing ${path.basename(videoPath)}:`, error);
   }

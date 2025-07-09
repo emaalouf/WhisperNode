@@ -1,4 +1,5 @@
 import path from 'path';
+import { config } from './config';
 
 /**
  * Extracts the video ID from a filename with the pattern: name-videoId.extension
@@ -41,4 +42,35 @@ export function createFilenameWithId(
   }
   
   return `${newBaseName}${newExtension}`;
+}
+
+/**
+ * Detects the language of a video based on its filename and the language map
+ * @param filename The video filename
+ * @returns The detected language code or null if no match found
+ */
+export function detectLanguage(filename: string): string | null {
+  // First, check for default language if set
+  if (!config.detectLanguage) {
+    return config.defaultLanguage;
+  }
+  
+  // Look through the language map for matches in the filename
+  const lowercaseFilename = filename.toLowerCase();
+  
+  for (const [pattern, language] of Object.entries(config.languageMap)) {
+    if (lowercaseFilename.includes(pattern.toLowerCase())) {
+      console.log(`🔍 Language detected for ${filename}: ${language} (matched pattern: ${pattern})`);
+      return language;
+    }
+  }
+
+  // If we have Arabic characters, assume it's Arabic
+  if (/[\u0600-\u06FF]/.test(filename)) {
+    console.log(`🔍 Arabic language detected for ${filename} (based on Arabic characters)`);
+    return 'ar';
+  }
+  
+  // If no match found, return default language
+  return config.defaultLanguage;
 } 

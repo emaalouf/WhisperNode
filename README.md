@@ -11,6 +11,7 @@ A Node.js application that uses [nodejs-whisper](https://www.npmjs.com/package/n
 - Support for multiple languages
 - Customizable configuration via environment variables
 - **Preserves video IDs** in filenames for reupload compatibility (format: `name-viXXXXXX.mp4`)
+- **Smart language detection** from filenames to improve transcription accuracy
 
 ## Prerequisites
 
@@ -61,6 +62,29 @@ For example:
   - `lecture-vi4pXldZVULSf4JaSdaWK9sX.srt`
   - `lecture-vi4pXldZVULSf4JaSdaWK9sX.vtt`
 
+### Language Detection
+
+The application can automatically detect the language of videos based on their filenames. This improves transcription accuracy by providing the Whisper model with language information.
+
+You can configure language detection in several ways:
+
+1. **Default language**: Set a default language for all videos
+2. **Pattern matching**: Map patterns in filenames to specific languages
+3. **Arabic detection**: Automatically detects Arabic characters in filenames
+
+Configure language detection in your `.env` file:
+
+```
+# Set a default language for all videos
+DEFAULT_LANGUAGE=ar
+
+# Map filename patterns to specific languages
+LANGUAGE_MAP=arabic:ar,Marina:en,الدوالي:ar,النوم:ar,النزيف:ar,الغازات:ar
+
+# Enable/disable language detection (default: enabled)
+DETECT_LANGUAGE=true
+```
+
 ## Configuration
 
 You can customize the application by creating a `.env` file in the project root with the following variables:
@@ -86,6 +110,11 @@ OUTPUT_TEXT=false
 OUTPUT_WORDS=false
 OUTPUT_LRC=false
 OUTPUT_CSV=false
+
+# Language options
+DEFAULT_LANGUAGE=ar
+DETECT_LANGUAGE=true
+LANGUAGE_MAP=arabic:ar,Marina:en,الدوالي:ar,النوم:ar,النزيف:ar,الغازات:ar
 ```
 
 ### Available models
