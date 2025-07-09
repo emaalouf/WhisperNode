@@ -22,8 +22,18 @@ export async function postProcessSubtitles(filePath: string, minWordsPerLine: nu
     let processedContent: string;
     if (ext === '.srt') {
       processedContent = processSrtFile(content, minWordsPerLine);
+      
+      // Apply deduplication if enabled
+      if (config.deduplicateSubtitles) {
+        processedContent = deduplicateSubtitles(processedContent, config.maxDuplicates);
+      }
     } else if (ext === '.vtt') {
       processedContent = processVttFile(content, minWordsPerLine);
+      
+      // Apply deduplication if enabled
+      if (config.deduplicateSubtitles) {
+        processedContent = deduplicateSubtitles(processedContent, config.maxDuplicates);
+      }
     } else {
       return;
     }
@@ -146,6 +156,68 @@ function processVttFile(content: string, minWordsPerLine: number): string {
 function countWords(text: string): number {
   // For Arabic text, count words by splitting on spaces and filtering empty strings
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Deduplicate repeated subtitle lines
+ * @param content The subtitle content to deduplicate
+ * @param maxDuplicates Maximum number of allowed consecutive duplicates
+ */
+export function deduplicateSubtitles(content: string, maxDuplicates: number = 1): string {
+  // Determine if it's SRT or VTT format
+  const isSrt = content.includes('\r\n\r\n') || content.includes('\n\n');
+  const separator = content.includes('\r\n\r\n') ? '\r\n\r\n' : '\n\n';
+  
+  // Split into subtitle entries
+  const entries = content.split(separator).filter(Boolean);
+  const result: string[] = [];
+  
+  const seenTexts = new Map<string, number>();
+  let lastTextKey = '';
+  
+  for (const entry of entries) {
+    const lines = entry.split('\n').filter(Boolean);
+    
+    if (lines.length < 2) continue;
+    
+    // Extract index/timestamp and text parts
+    let indexOrTimestamp, text;
+    
+    if (isSrt) {
+      // For SRT: first line is index, second is timestamp, rest is text
+      indexOrTimestamp = lines.slice(0, 2).join('\n');
+      text = lines.slice(2).join(' ').trim();
+    } else {
+      // For VTT: first line is timestamp, rest is text
+      indexOrTimestamp = lines[0];
+      text = lines.slice(1).join(' ').trim();
+    }
+    
+    // Create a key for comparing texts (normalize case, trim whitespace)
+    const textKey = text.toLowerCase().trim();
+    
+    // Skip exact duplicates beyond the allowed maximum
+    if (textKey === lastTextKey) {
+      const count = seenTexts.get(textKey) || 0;
+      if (count >= maxDuplicates) {
+        continue; // Skip this duplicate
+      }
+      seenTexts.set(textKey, count + 1);
+    } else {
+      // New text
+      seenTexts.set(textKey, 1);
+      lastTextKey = textKey;
+    }
+    
+    // Add to result
+    if (isSrt) {
+      result.push(`${indexOrTimestamp}\n${text}`);
+    } else {
+      result.push(`${indexOrTimestamp}\n${text}`);
+    }
+  }
+  
+  return result.join(separator) + separator;
 }
 
 /**

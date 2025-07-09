@@ -4,6 +4,29 @@ import { nodewhisper } from 'nodejs-whisper';
 import { config, SUPPORTED_EXTENSIONS } from './config';
 import { extractVideoId, detectLanguage, postProcessSubtitles } from './utils';
 import os from 'os';
+import { Worker } from 'worker_threads';
+// @ts-ignore - Add ts-ignore for worker-threads-pool which may not have type definitions
+import { createPool } from 'worker-threads-pool';
+
+// Types for worker threads
+interface WorkerMessage {
+  success: boolean;
+  videoPath: string;
+  error?: string;
+}
+
+interface WorkerData {
+  videoPath: string;
+  options: any;
+}
+
+// For AMD GPU processing
+if (config.useAmdGpu) {
+  process.env.HSA_OVERRIDE_GFX_VERSION = '10.3.0';
+  process.env.ROCR_VISIBLE_DEVICES = '0';
+  process.env.HIP_VISIBLE_DEVICES = '0';
+  console.log('🚀 AMD GPU processing enabled');
+}
 
 // Set environment variables for CUDA before importing nodewhisper
 if (config.withCuda) {
@@ -15,6 +38,8 @@ if (config.withCuda) {
 // Track processing progress
 let processedCount = 0;
 let totalVideos = 0;
+// Worker thread pool
+let pool: any = null; // Worker thread pool
 
 // Create output directory if it doesn't exist
 async function ensureDirectories() {
@@ -96,8 +121,8 @@ async function processVideo(videoPath: string): Promise<void> {
       outputInLrc: config.formats.lrc,
       outputInCsv: config.formats.csv,
       // For Arabic text, we need to disable word timestamps to get proper phrase groups
-      wordTimestamps: false,
-      splitOnWord: false,
+      wordTimestamps: config.wordTimestamps,
+      splitOnWord: config.splitOnWord,
       translateToEnglish: config.translateToEnglish,
       max_words_per_line: 7, // Add minimum words per line
     };
@@ -151,16 +176,160 @@ async function processVideo(videoPath: string): Promise<void> {
   }
 }
 
-// Process multiple videos in parallel
+// Worker thread for processing videos
+function createWorkerScript() {
+  // Create a worker script that can be executed in a separate thread
+  const workerScript = `
+    const { parentPort, workerData } = require('worker_threads');
+    const { nodewhisper } = require('nodejs-whisper');
+    const fs = require('fs-extra');
+    const path = require('path');
+
+    async function processVideoInWorker(videoPath, options) {
+      try {
+        await nodewhisper(videoPath, options);
+        parentPort.postMessage({ success: true, videoPath });
+      } catch (error) {
+        parentPort.postMessage({ 
+          success: false, 
+          videoPath, 
+          error: error.toString() 
+        });
+      }
+    }
+
+    processVideoInWorker(workerData.videoPath, workerData.options);
+  `;
+
+  const tempFilePath = path.join(__dirname, 'worker-script.js');
+  fs.writeFileSync(tempFilePath, workerScript);
+  return tempFilePath;
+}
+
+// Process multiple videos in parallel using worker threads
 async function processVideosInParallel(videoPaths: string[], concurrency: number): Promise<void> {
-  // Process videos in batches based on concurrency
-  const batches = [];
-  for (let i = 0; i < videoPaths.length; i += concurrency) {
-    batches.push(videoPaths.slice(i, i + concurrency));
-  }
+  console.log(`Setting up parallel processing with ${concurrency} concurrent processes...`);
   
-  for (const batch of batches) {
-    await Promise.all(batch.map(videoPath => processVideo(videoPath)));
+  // Create a worker thread pool
+  pool = createPool({ max: concurrency });
+  const workerScriptPath = createWorkerScript();
+  
+  // Process videos in parallel batches
+  const promises = videoPaths.map(videoPath => {
+    return new Promise<void>(async (resolve, reject) => {
+      try {
+        const filename = path.basename(videoPath);
+        console.log(`Queuing: ${filename}`);
+        
+        // Detect language from filename
+        const language = detectLanguage(filename);
+        
+        // Create whisper options with language if detected
+        const whisperOptions: any = {
+          outputInSrt: config.formats.srt,
+          outputInVtt: config.formats.vtt,
+          outputInJson: config.formats.json,
+          outputInText: config.formats.text,
+          outputInWords: config.formats.words,
+          outputInLrc: config.formats.lrc,
+          outputInCsv: config.formats.csv,
+          // For Arabic text, we need to disable word timestamps to get proper phrase groups
+          wordTimestamps: config.wordTimestamps,
+          splitOnWord: config.splitOnWord,
+          translateToEnglish: config.translateToEnglish,
+          max_words_per_line: 7, // Add minimum words per line
+        };
+        
+        // Add language parameter if detected
+        if (language) {
+          whisperOptions.language = language;
+          console.log(`🌐 Using language for ${filename}: ${language}`);
+        }
+        
+        const options = {
+          modelName: config.modelName,
+          autoDownloadModelName: config.modelName,
+          removeWavFileAfterTranscription: config.removeWavFileAfterTranscription,
+          // Enable GPU acceleration
+          withCuda: config.withCuda,
+          whisperOptions,
+        };
+        
+        // Use worker pool to process the video
+        pool.acquire(workerScriptPath, { videoPath, options } as WorkerData, function(err: Error | null, worker: Worker) {
+          if (err) {
+            console.error(`❌ Worker error for ${filename}:`, err);
+            processedCount++;
+            console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
+            resolve();
+            return;
+          }
+          
+          // Listen for worker completion
+          worker.on('message', async (result: WorkerMessage) => {
+            if (result.success) {
+              try {
+                // Post-process the subtitle files
+                const baseFileName = path.basename(videoPath, path.extname(videoPath));
+                const dirPath = path.dirname(videoPath);
+                
+                // Process SRT and VTT files
+                if (config.formats.srt) {
+                  const srtFile = path.join(dirPath, `${baseFileName}.srt`);
+                  if (await fs.pathExists(srtFile)) {
+                    await postProcessSubtitles(srtFile, 7);
+                  }
+                }
+                
+                if (config.formats.vtt) {
+                  const vttFile = path.join(dirPath, `${baseFileName}.vtt`);
+                  if (await fs.pathExists(vttFile)) {
+                    await postProcessSubtitles(vttFile, 7);
+                  }
+                }
+                
+                // After processing, handle the output files to preserve video ID
+                await handleOutputFiles(videoPath);
+                
+                processedCount++;
+                console.log(`✅ Completed: ${filename} (${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete)`);
+              } catch (error) {
+                console.error(`❌ Post-processing error for ${filename}:`, error);
+                processedCount++;
+                console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
+              }
+            } else {
+              console.error(`❌ Error processing ${filename}:`, result.error);
+              processedCount++;
+              console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
+            }
+            resolve();
+          });
+          
+          worker.on('error', (err: Error) => {
+            console.error(`❌ Worker error for ${filename}:`, err);
+            processedCount++;
+            console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
+            resolve();
+          });
+        });
+      } catch (error) {
+        console.error(`❌ Error queueing ${path.basename(videoPath)}:`, error);
+        processedCount++;
+        console.log(`⚠️ Progress: ${processedCount}/${totalVideos}, ${Math.round((processedCount/totalVideos)*100)}% complete`);
+        resolve();
+      }
+    });
+  });
+  
+  // Wait for all videos to be processed
+  await Promise.all(promises);
+  
+  // Clean up the worker script
+  try {
+    fs.unlinkSync(workerScriptPath);
+  } catch (e) {
+    // Ignore cleanup errors
   }
 }
 
@@ -182,23 +351,31 @@ async function main() {
     totalVideos = videoFiles.length;
     console.log(`Found ${totalVideos} video files. Starting processing...`);
     
-    // Determine optimal concurrency based on available CPU cores
-    // When using GPU, we can process multiple videos concurrently
-    const cpuCores = os.cpus().length;
-    // Using half the cores for parallelism with GPU (adjust this based on performance testing)
-    const concurrency = config.withCuda ? Math.max(2, Math.floor(cpuCores / 2)) : 1;
-    
-    console.log(`Using ${concurrency} concurrent processes with GPU: ${config.withCuda ? 'Enabled' : 'Disabled'}`);
-    
     // Create an array of file paths to process
     const videoPaths = videoFiles.map(file => path.join(config.videosDir, file));
     
-    // Process videos in parallel
-    await processVideosInParallel(videoPaths, concurrency);
+    // Check if we should use AMD GPU optimization or parallel processing
+    const useParallel = config.maxConcurrentProcesses > 1 || process.argv.includes('--parallel');
+    
+    if (useParallel) {
+      console.log(`Using parallel processing with ${config.maxConcurrentProcesses} workers`);
+      await processVideosInParallel(videoPaths, config.maxConcurrentProcesses);
+    } else {
+      // Process sequentially for testing or debugging
+      console.log(`Using sequential processing (single thread)`);
+      for (const videoPath of videoPaths) {
+        await processVideo(videoPath);
+      }
+    }
     
     console.log('All videos processed successfully!');
   } catch (error) {
     console.error('An error occurred:', error);
+  } finally {
+    // Clean up worker thread pool if used
+    if (pool) {
+      pool.destroy();
+    }
   }
 }
 

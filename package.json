@@ -6,7 +6,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "download-model": "npx nodejs-whisper download"
+    "download-model": "npx nodejs-whisper download",
+    "rebuild-amd": "cd node_modules/nodejs-whisper/cpp/whisper.cpp && mkdir -p build && cd build && cmake -DGGML_USE_HIPBLAS=ON -DGGML_USE_METAL=OFF -DGGML_USE_CUDA=OFF .. && make -j$(nproc)",
+    "parallel-process": "node dist/index.js --parallel"
   },
   "keywords": [],
   "author": "",
@@ -18,7 +20,8 @@
     "dotenv": "^17.2.0",
     "fs-extra": "^11.3.0",
     "nodejs-whisper": "^0.2.9",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "worker-threads-pool": "^2.0.0"
   },
   "devDependencies": {
     "ts-node": "^10.9.2"

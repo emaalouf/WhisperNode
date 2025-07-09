@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs-extra';
 import dotenv from 'dotenv';
+import os from 'os';
 
 // Load environment variables from .env file if it exists
 dotenv.config();
@@ -13,6 +14,10 @@ interface Config {
   // Whisper model configuration
   modelName: string;
   withCuda: boolean;
+  
+  // AMD GPU specific options
+  useAmdGpu: boolean;
+  maxConcurrentProcesses: number;
   
   // Output formats
   formats: {
@@ -35,7 +40,15 @@ interface Config {
   defaultLanguage: string | null; // Language code like 'en', 'ar', 'fr', etc.
   detectLanguage: boolean;        // Whether to attempt language detection
   languageMap: Record<string, string>; // Map video filename patterns to languages
+  
+  // Subtitle post-processing
+  deduplicateSubtitles: boolean;
+  maxDuplicates: number;
 }
+
+// Determine optimal concurrency based on system
+const cpuCores = os.cpus().length;
+const defaultConcurrency = Math.max(1, Math.floor(cpuCores * 0.75)); // Use 75% of available cores
 
 // Default configuration
 const defaultConfig: Config = {
@@ -44,6 +57,10 @@ const defaultConfig: Config = {
   
   modelName: process.env.WHISPER_MODEL || 'base',
   withCuda: process.env.USE_CUDA === 'false' ? false : true, // Default to true unless explicitly set to false
+  
+  // AMD GPU support
+  useAmdGpu: process.env.USE_AMD_GPU === 'true' || false,
+  maxConcurrentProcesses: parseInt(process.env.MAX_CONCURRENT_PROCESSES || defaultConcurrency.toString(), 10),
   
   formats: {
     srt: true,
@@ -55,8 +72,8 @@ const defaultConfig: Config = {
     csv: process.env.OUTPUT_CSV === 'true' || false,
   },
   
-  wordTimestamps: process.env.WORD_TIMESTAMPS === 'false' ? false : true,
-  splitOnWord: process.env.SPLIT_ON_WORD === 'false' ? false : true,
+  wordTimestamps: process.env.WORD_TIMESTAMPS === 'true' ? true : false,
+  splitOnWord: process.env.SPLIT_ON_WORD === 'true' ? true : false,
   translateToEnglish: process.env.TRANSLATE_TO_ENGLISH === 'true' || false,
   removeWavFileAfterTranscription: process.env.REMOVE_WAV_FILE === 'false' ? false : true,
   
@@ -64,6 +81,10 @@ const defaultConfig: Config = {
   defaultLanguage: process.env.DEFAULT_LANGUAGE || null,
   detectLanguage: process.env.DETECT_LANGUAGE !== 'false',
   languageMap: parseLanguageMap(process.env.LANGUAGE_MAP),
+  
+  // Subtitle post-processing
+  deduplicateSubtitles: process.env.DEDUPLICATE_SUBTITLES === 'false' ? false : true,
+  maxDuplicates: parseInt(process.env.MAX_DUPLICATES || '1', 10),
 };
 
 /**
@@ -215,6 +236,17 @@ export const LANGUAGE_CODES = [
   'su',   // Sundanese
   'yue',  // Cantonese
 ];
+
+// Set OpenMP environment variables for optimal CPU performance
+if (!defaultConfig.useAmdGpu) {
+  // If not using AMD GPU, maximize CPU utilization
+  process.env.OMP_NUM_THREADS = cpuCores.toString();
+  process.env.OMP_DYNAMIC = 'true';
+  process.env.WHISPER_THREADS = cpuCores.toString();
+} else {
+  // Using AMD GPU - balance CPU resources
+  process.env.OMP_NUM_THREADS = Math.max(2, Math.floor(cpuCores / 4)).toString();
+}
 
 // Export the configuration
 export const config: Config = defaultConfig; 
